@@ -82,7 +82,7 @@ for variable in ["Open", "Close"]:
         "Excès de kurtosis": x.kurt()
     }
 
-    # 6. Afficher les fréquences et les classes modales
+
     print(f"\n{'_' * 60}")
     print(f"VARIABLE : {variable}")
     print(f"{'_' * 60}")
@@ -99,3 +99,31 @@ tableau_statistiques = pd.DataFrame(resultats)
 
 print("\nTABLEAU DES MESURES STATISTIQUES")
 print(tableau_statistiques.round(4).to_string())
+
+
+
+df["Date"] = pd.to_datetime(df["Date"], errors="raise")
+df["Close"] = pd.to_numeric(df["Close"], errors="coerce")
+
+# Essential: sort from oldest to newest
+df = df.sort_values("Date").reset_index(drop=True)
+
+
+
+
+# Compare Close with the previous session
+previous_close = df["Close"].shift(1)
+valid = df["Close"].notna() & previous_close.notna()
+
+# Keep unknown directions missing, including the first row
+df["Direction"] = pd.Series(pd.NA, index=df.index, dtype="string")
+
+df.loc[valid & (df["Close"] > previous_close), "Direction"] = "Hausse"
+df.loc[valid & (df["Close"] < previous_close), "Direction"] = "Baisse"
+df.loc[valid & (df["Close"] == previous_close), "Direction"] = "Stable"
+
+# Display the result
+print(df[["Date", "Close", "Direction"]].head(10))
+
+# Save a new CSV
+df.to_csv("apple_stock_direction.csv", index=False)
