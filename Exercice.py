@@ -1,13 +1,25 @@
+
 import pandas as pd
 import numpy as np
+import matplotlib.pyplot as plt
 
+# ==========================================
+# 1. CHARGEMENT ET PREPARATION DES DONNEES
+# ==========================================
 
 df = pd.read_csv("apple_stock.csv")
 
-
 df.columns = df.columns.str.strip()
 
+df["Date"] = pd.to_datetime(df["Date"], errors="raise")
+df = df.sort_values("Date").reset_index(drop=True)
+
 resultats = {}
+
+
+# ==========================================
+# 2. ANALYSE DES VARIABLES OPEN ET CLOSE
+# ==========================================
 
 for variable in ["Open", "Close"]:
 
@@ -19,8 +31,7 @@ for variable in ["Open", "Close"]:
             f"{variable} : au moins 4 valeurs valides sont nécessaires."
         )
 
-    #  Effectifs et fréquences par intervalles
-    # Règle de Sturges pour choisir le nombre d'intervalles
+    # Effectifs et frequences par intervalles
     nombre_intervalles = int(np.ceil(1 + np.log2(len(x))))
 
     intervalles = pd.cut(
@@ -37,26 +48,25 @@ for variable in ["Open", "Close"]:
         "Pourcentage (%)": effectifs / len(x) * 100
     })
 
-    # Toutes les classes modales en cas d'égalité
     classes_modales = effectifs[
         effectifs == effectifs.max()
     ].index
 
-    # 3. Quartiles et IQR
+    # Quartiles et IQR
     q1 = x.quantile(0.25)
     q2 = x.quantile(0.50)
     q3 = x.quantile(0.75)
 
     iqr = q3 - q1
 
-    # 4. Bornes et comptage des valeurs atypiques
+    # Bornes et valeurs atypiques
     borne_inferieure = q1 - 1.5 * iqr
     borne_superieure = q3 + 1.5 * iqr
 
     nb_inferieur = (x < borne_inferieure).sum()
     nb_superieur = (x > borne_superieure).sum()
 
-    # 5. Toutes les mesures statistiques
+    # Mesures statistiques
     resultats[variable] = {
         "Effectif valide": len(x),
         "Valeurs exclues": len(df) - len(x),
@@ -82,48 +92,285 @@ for variable in ["Open", "Close"]:
         "Excès de kurtosis": x.kurt()
     }
 
-
     print(f"\n{'_' * 60}")
     print(f"VARIABLE : {variable}")
     print(f"{'_' * 60}")
 
-    print("\n Effectifs et fréquences par intervalles de prix :")
+    print("\nEffectifs et fréquences par intervalles de prix :")
     print(tableau_frequences.round(4).to_string())
 
     print("\nClasse(s) modale(s) :")
+
     for classe in classes_modales:
         print(f"{classe} : {effectifs.max()} observations")
 
-# 7. Tableau récapitulatif Open / Close
+
+# ==========================================
+# 3. TABLEAU RECAPITULATIF OPEN / CLOSE
+# ==========================================
+
 tableau_statistiques = pd.DataFrame(resultats)
 
 print("\nTABLEAU DES MESURES STATISTIQUES")
 print(tableau_statistiques.round(4).to_string())
 
 
+# ==========================================
+# 4. CREATION DE LA VARIABLE DIRECTION
+# ==========================================
 
-df["Date"] = pd.to_datetime(df["Date"], errors="raise")
 df["Close"] = pd.to_numeric(df["Close"], errors="coerce")
 
-# Essential: sort from oldest to newest
-df = df.sort_values("Date").reset_index(drop=True)
+# Comparer le Close du jour avec celui du lendemain
+next_close = df["Close"].shift(-1)
+
+valid = df["Close"].notna() & next_close.notna()
+
+df["Direction"] = pd.Series(
+    pd.NA,
+    index=df.index,
+    dtype="string"
+)
+
+df.loc[
+    valid & (next_close > df["Close"]),
+    "Direction"
+] = "Hausse"
+
+df.loc[
+    valid & (next_close < df["Close"]),
+    "Direction"
+] = "Baisse"
+
+df.loc[
+    valid & (next_close == df["Close"]),
+    "Direction"
+] = "Stable"
 
 
+# ==========================================
+# 5. ANALYSE STATISTIQUE DE DIRECTION
+# ==========================================
+
+print("\n" + "_" * 60)
+print("VARIABLE : Direction")
+print("_" * 60)
+
+direction = df["Direction"].dropna()
+
+if len(direction) == 0:
+    raise ValueError("Aucune observation valide pour Direction.")
+
+ordre = ["Hausse", "Baisse", "Stable"]
+
+# Effectifs
+effectifs_direction = direction.value_counts().reindex(
+    ordre,
+    fill_value=0
+)
+
+# Frequences
+frequences_direction = effectifs_direction / len(direction)
+
+# Pourcentages
+pourcentages_direction = frequences_direction * 100
+
+# Tableau recapitulatif
+tableau_direction = pd.DataFrame({
+    "Effectif": effectifs_direction,
+    "Fréquence": frequences_direction,
+    "Pourcentage (%)": pourcentages_direction
+})
+
+print("\nEffectifs et fréquences :")
+print(tableau_direction.round(4).to_string())
+
+# Mode
+modes = direction.mode().tolist()
+
+print("\nClasse(s) modale(s) :")
+
+for mode in modes:
+    print(
+        f"{mode} : "
+        f"{effectifs_direction[mode]} observations"
+    )
+
+print("\nEffectif total :", len(direction))
+
+print(
+    "Valeurs manquantes :",
+    df["Direction"].isna().sum()
+)
 
 
-# Compare Close with the previous session
-previous_close = df["Close"].shift(1)
-valid = df["Close"].notna() & previous_close.notna()
+# ==========================================
+# 6. QUESTION 2 : NORMALISATION Z-SCORE
+# ==========================================
 
-# Keep unknown directions missing, including the first row
-df["Direction"] = pd.Series(pd.NA, index=df.index, dtype="string")
+print("\n" + "_" * 60)
+print("NORMALISATION DES VARIABLES NUMERIQUES")
+print("_" * 60)
 
-df.loc[valid & (df["Close"] > previous_close), "Direction"] = "Hausse"
-df.loc[valid & (df["Close"] < previous_close), "Direction"] = "Baisse"
-df.loc[valid & (df["Close"] == previous_close), "Direction"] = "Stable"
+variables_numeriques = ["Open", "Close"]
 
-# Display the result
-print(df[["Date", "Close", "Direction"]].head(10))
+resultats_normalisation = {}
 
-# Save a new CSV
+for variable in variables_numeriques:
+
+    x = pd.to_numeric(df[variable], errors="coerce")
+
+    moyenne = x.mean()
+    ecart_type = x.std(ddof=0)
+
+    if pd.notna(ecart_type) and ecart_type != 0:
+
+        # Formule Z-score
+        df[variable + "_Zscore"] = (
+            x - moyenne
+        ) / ecart_type
+
+    else:
+        df[variable + "_Zscore"] = np.nan
+
+    # Verifier les resultats
+    resultats_normalisation[variable] = {
+        "Moyenne originale": moyenne,
+        "Ecart-type original": ecart_type,
+        "Moyenne normalisée": df[variable + "_Zscore"].mean(),
+        "Ecart-type normalisé": df[variable + "_Zscore"].std(ddof=0)
+    }
+
+    print(f"\nVariable : {variable}")
+
+    print("Moyenne originale :", round(moyenne, 4))
+    print("Ecart-type original :", round(ecart_type, 4))
+
+    print(
+        "Moyenne après normalisation :",
+        round(df[variable + "_Zscore"].mean(), 4)
+    )
+
+    print(
+        "Ecart-type après normalisation :",
+        round(df[variable + "_Zscore"].std(ddof=0), 4)
+    )
+
+
+# Tableau comparatif de normalisation
+tableau_normalisation = pd.DataFrame(
+    resultats_normalisation
+)
+
+print("\nTABLEAU DE NORMALISATION")
+print(tableau_normalisation.round(4).to_string())
+
+
+# Direction : aucune normalisation
+print("\nVariable Direction :")
+print("Aucune normalisation nécessaire.")
+print("Variable qualitative nominale.")
+
+
+# ==========================================
+# 7. VISUALISATION : EFFECTIFS DIRECTION
+# ==========================================
+
+plt.figure(figsize=(8, 5))
+
+effectifs_direction.plot(kind="bar")
+
+plt.title("Répartition des directions du cours Apple")
+plt.xlabel("Direction")
+plt.ylabel("Nombre d'observations")
+plt.xticks(rotation=0)
+plt.grid(axis="y", alpha=0.3)
+
+plt.tight_layout()
+plt.show()
+
+
+# ==========================================
+# 8. VISUALISATION : POURCENTAGES DIRECTION
+# ==========================================
+
+plt.figure(figsize=(8, 5))
+
+pourcentages_direction.plot(kind="bar")
+
+plt.title("Répartition des directions en pourcentage")
+plt.xlabel("Direction")
+plt.ylabel("Pourcentage (%)")
+plt.xticks(rotation=0)
+plt.grid(axis="y", alpha=0.3)
+
+plt.tight_layout()
+plt.show()
+
+
+# ==========================================
+# 9. VISUALISATION : OPEN ET CLOSE
+# ==========================================
+
+for variable in ["Open", "Close"]:
+
+    x = pd.to_numeric(df[variable], errors="coerce").dropna()
+
+    # Histogramme
+    plt.figure(figsize=(8, 5))
+
+    plt.hist(x, bins="sturges", edgecolor="black")
+
+    plt.title(f"Distribution de la variable {variable}")
+    plt.xlabel("Prix ($)")
+    plt.ylabel("Effectif")
+    plt.grid(axis="y", alpha=0.3)
+
+    plt.tight_layout()
+    plt.show()
+
+    # Boxplot
+    plt.figure(figsize=(8, 4))
+
+    plt.boxplot(x, vert=False)
+
+    plt.title(f"Boîte à moustaches de {variable}")
+    plt.xlabel("Prix ($)")
+    plt.grid(axis="x", alpha=0.3)
+
+    plt.tight_layout()
+    plt.show()
+
+
+# ==========================================
+# 10. APERCU DES DONNEES
+# ==========================================
+
+print("\nAPERÇU DES DONNEES")
+
+print(
+    df[
+        ["Date", "Open", "Close", "Direction",
+         "Open_Zscore", "Close_Zscore"]
+    ].head(10).to_string(index=False)
+)
+
+
+# ==========================================
+# 11. EXPORTATION DES RESULTATS
+# ==========================================
+
 df.to_csv("apple_stock_direction.csv", index=False)
+
+tableau_direction.to_csv("analyse_direction.csv")
+
+tableau_statistiques.to_csv("statistiques_open_close.csv")
+
+tableau_normalisation.to_csv("normalisation.csv")
+
+print("\nFichiers exportés avec succès !")
+
+print("- apple_stock_direction.csv")
+print("- analyse_direction.csv")
+print("- statistiques_open_close.csv")
+print("- normalisation.csv")
